@@ -275,7 +275,11 @@ zfs_sync(struct super_block *sb, int wait, cred_t *cr)
 		dsl_pool_t *dp;
 		int error;
 
-		if ((error = zfs_enter(zfsvfs, FTAG)) != 0)
+		/*
+		 * If the dataset has been unmounted, return success. We might
+		 * be force-exporting, and we don't want to start a flush if so.
+		 */
+		if ((error = zfs_enter_unmountok(zfsvfs, FTAG)) != 0)
 			return (error);
 		dp = dmu_objset_pool(zfsvfs->z_os);
 

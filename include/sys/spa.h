@@ -962,10 +962,11 @@ extern void spa_iostats_trim_add(spa_t *spa, trim_type_t type,
     uint64_t extents_skipped, uint64_t bytes_skipped,
     uint64_t extents_failed, uint64_t bytes_failed);
 
-/* Config lock handling flags */
 typedef enum {
+	/* Config lock handling flags */
 	SCL_FLAG_TRYENTER	= 1U << 0,
 	SCL_FLAG_NOSUSPEND	= 1U << 1,
+	/* MMP flag */
 	SCL_FLAG_MMP		= 1U << 2,
 } spa_config_flag_t;
 
