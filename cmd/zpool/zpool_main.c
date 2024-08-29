@@ -512,7 +512,7 @@ get_usage(zpool_help_t idx)
 		return (gettext("\tinitialize [-c | -s | -u] [-w] <pool> "
 		    "[<device> ...]\n"));
 	case HELP_SCRUB:
-		return (gettext("\tscrub [-e | -s | -p | -C] [-w] "
+		return (gettext("\tscrub [-e | -s | -p | -C | -R] [-w] "
 		    "<pool> ...\n"));
 	case HELP_RESILVER:
 		return (gettext("\tresilver <pool> ...\n"));
@@ -8413,13 +8413,14 @@ wait_callback(zpool_handle_t *zhp, void *data)
 }
 
 /*
- * zpool scrub [-e | -s | -p | -C] [-w] <pool> ...
+ * zpool scrub [-e | -s | -p | -C | -R] [-w] <pool> ...
  *
  *	-e	Only scrub blocks in the error log.
  *	-s	Stop.  Stops any in-progress scrub.
  *	-p	Pause. Pause in-progress scrub.
  *	-w	Wait.  Blocks until scrub has completed.
  *	-C	Scrub from last saved txg.
+ *	-R	Scrub only recent data.
  */
 int
 zpool_do_scrub(int argc, char **argv)
@@ -8436,9 +8437,10 @@ zpool_do_scrub(int argc, char **argv)
 	boolean_t is_pause = B_FALSE;
 	boolean_t is_stop = B_FALSE;
 	boolean_t is_txg_continue = B_FALSE;
+	boolean_t is_recent_scrub = B_FALSE;
 
 	/* check options */
-	while ((c = getopt(argc, argv, "spweC")) != -1) {
+	while ((c = getopt(argc, argv, "spweCR")) != -1) {
 		switch (c) {
 		case 'e':
 			is_error_scrub = B_TRUE;
@@ -8454,6 +8456,9 @@ zpool_do_scrub(int argc, char **argv)
 			break;
 		case 'C':
 			is_txg_continue = B_TRUE;
+			break;
+		case 'R':
+			is_recent_scrub = B_TRUE;
 			break;
 		case '?':
 			(void) fprintf(stderr, gettext("invalid option '%c'\n"),
@@ -8478,11 +8483,30 @@ zpool_do_scrub(int argc, char **argv)
 		(void) fprintf(stderr, gettext("invalid option "
 		    "combination :-e and -C are mutually exclusive\n"));
 		usage(B_FALSE);
+	} else if (is_recent_scrub && is_txg_continue) {
+		(void) fprintf(stderr, gettext("invalid option "
+		    "combination :-R and -C are mutually exclusive\n"));
+		usage(B_FALSE);
+	} else if (is_pause && is_recent_scrub) {
+		(void) fprintf(stderr, gettext("invalid option "
+		    "combination :-p and -R are mutually exclusive\n"));
+		usage(B_FALSE);
+	} else if (is_stop && is_recent_scrub) {
+		(void) fprintf(stderr, gettext("invalid option "
+		    "combination :-s and -R are mutually exclusive\n"));
+		usage(B_FALSE);
+	} else if (is_error_scrub && is_recent_scrub) {
+		(void) fprintf(stderr, gettext("invalid option "
+		    "combination :-e and -R are mutually exclusive\n"));
+		usage(B_FALSE);
 	} else {
-		if (is_error_scrub)
+		if (is_error_scrub) {
 			cb.cb_type = POOL_SCAN_ERRORSCRUB;
+		}
 
-		if (is_pause) {
+		if (is_recent_scrub) {
+			cb.cb_scrub_cmd = POOL_SCRUB_RECENT_TXGS;
+		} else if (is_pause) {
 			cb.cb_scrub_cmd = POOL_SCRUB_PAUSE;
 		} else if (is_stop) {
 			cb.cb_type = POOL_SCAN_NONE;
