@@ -36,7 +36,7 @@
 .Sh SYNOPSIS
 .Nm zpool
 .Cm scrub
-.Op Ns Fl e | Ns Fl p | Fl s Ns | Fl C Ns
+.Op Ns Fl e | Ns Fl p | Fl s Ns | Fl C Ns | Fl R Ns
 .Op Fl w
 .Ar pool Ns …
 .
@@ -117,6 +117,10 @@ resilvering, nor can it be run when a regular scrub is paused.
 Continue scrub from last saved txg (see zpool
 .Sy last_scrubbed_txg
 property).
+.It Fl R
+Scrub only recent data (this can be controlled by the
+.Sy zfs_scrub_recent_txgs
+parameter).
 .El
 .Sh EXAMPLES
 .Ss Example 1
