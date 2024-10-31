@@ -8350,6 +8350,8 @@ zpool_do_reopen(int argc, char **argv)
 typedef struct scrub_cbdata {
 	int	cb_type;
 	pool_scrub_cmd_t cb_scrub_cmd;
+	time_t	cb_date_start;
+	time_t	cb_date_end;
 } scrub_cbdata_t;
 
 static boolean_t
@@ -8393,7 +8395,8 @@ scrub_callback(zpool_handle_t *zhp, void *data)
 		return (1);
 	}
 
-	err = zpool_scan(zhp, cb->cb_type, cb->cb_scrub_cmd);
+	err = zpool_scan(zhp, cb->cb_type, cb->cb_scrub_cmd, cb->cb_date_start,
+	    cb->cb_date_end);
 
 	if (err == 0 && zpool_has_checkpoint(zhp) &&
 	    cb->cb_type == POOL_SCAN_SCRUB) {
@@ -8412,11 +8415,33 @@ wait_callback(zpool_handle_t *zhp, void *data)
 	return (zpool_wait(zhp, *act));
 }
 
+static time_t
+date_string_to_sec(const char *timestr)
+{
+	int ret;
+	struct tm tm = {0};
+
+	ret = sscanf(timestr, "%4d-%2d-%2d %2d:%2d", &tm.tm_year, &tm.tm_mon,
+	    &tm.tm_mday, &tm.tm_hour, &tm.tm_min);
+	if (ret < 3) {
+		fprintf(stderr, gettext("Failed to parse the date.\n"));
+		usage(B_FALSE);
+	}
+
+	// Adjust struct
+	tm.tm_year -= 1900;
+	tm.tm_mon -= 1;
+
+	return timegm(&tm);
+}
+
 /*
  * zpool scrub [-s | -p] [-w] [-e] [-C] <pool> ...
  *
  *	-C	Scrub from last saved txg.
  *	-e	Only scrub blocks in the error log.
+ *	-E	End date of scrub.
+ *	-S	Start date of scrub.
  *	-s	Stop.  Stops any in-progress scrub.
  *	-p	Pause. Pause in-progress scrub.
  *	-w	Wait.  Blocks until scrub has completed.
@@ -8431,6 +8456,7 @@ zpool_do_scrub(int argc, char **argv)
 
 	cb.cb_type = POOL_SCAN_SCRUB;
 	cb.cb_scrub_cmd = POOL_SCRUB_NORMAL;
+	cb.cb_date_start = cb.cb_date_end = 0;
 
 	boolean_t is_error_scrub = B_FALSE;
 	boolean_t is_pause = B_FALSE;
@@ -8438,7 +8464,7 @@ zpool_do_scrub(int argc, char **argv)
 	boolean_t is_txg_continue = B_FALSE;
 
 	/* check options */
-	while ((c = getopt(argc, argv, "spweC")) != -1) {
+	while ((c = getopt(argc, argv, "spweCE:S:")) != -1) {
 		switch (c) {
 		case 'C':
 			is_txg_continue = B_TRUE;
@@ -8446,8 +8472,14 @@ zpool_do_scrub(int argc, char **argv)
 		case 'e':
 			is_error_scrub = B_TRUE;
 			break;
+		case 'E':
+			cb.cb_date_end = date_string_to_sec(optarg);
+			break;
 		case 's':
 			is_stop = B_TRUE;
+			break;
+		case 'S':
+			cb.cb_date_start = date_string_to_sec(optarg);
 			break;
 		case 'p':
 			is_pause = B_TRUE;
@@ -8491,6 +8523,13 @@ zpool_do_scrub(int argc, char **argv)
 		} else {
 			cb.cb_scrub_cmd = POOL_SCRUB_NORMAL;
 		}
+	}
+
+	if ((cb.cb_date_start != 0 || cb.cb_date_end != 0) &&
+	    cb.cb_scrub_cmd != POOL_SCRUB_NORMAL) {
+		(void) fprintf(stderr, gettext("invalid option combination: "
+		    "start/end date is avlilable only with normal scrub\n"));
+		usage(B_FALSE);
 	}
 
 	if (wait && (cb.cb_type == POOL_SCAN_NONE ||
