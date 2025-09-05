@@ -1754,6 +1754,20 @@ zfs_ioc_pool_scrub(const char *poolname, nvlist_t *innvl, nvlist_t *outnvl)
 	} else if (scan_cmd == POOL_SCRUB_FROM_LAST_TXG) {
 		error = spa_scan_range(spa, scan_type,
 		    spa_get_last_scrubbed_txg(spa), 0);
+	} else if (scan_cmd == POOL_SCRUB_RECENT) {
+		uint64_t txg_start;
+		hrtime_t lasttime;
+
+		txg_start = 0;
+		mutex_enter(&spa->spa_txg_log_time_lock);
+		lasttime = dbrrd_tail_time(&spa->spa_txg_log_time);
+		if (lasttime > zfs_scrub_recent_time) {
+			txg_start = dbrrd_query(&spa->spa_txg_log_time,
+			    lasttime - zfs_scrub_recent_time, DBRRD_FLOOR);
+		}
+		mutex_exit(&spa->spa_txg_log_time_lock);
+
+		error = spa_scan_range(spa, scan_type, txg_start, 0);
 	} else {
 		uint64_t txg_start, txg_end;
 
@@ -6123,6 +6137,7 @@ zfs_ioc_clear(zfs_cmd_t *zc)
 {
 	spa_t *spa;
 	vdev_t *vd;
+	boolean_t was_suspended;
 	int error;
 
 	/*
@@ -6178,6 +6193,8 @@ zfs_ioc_clear(zfs_cmd_t *zc)
 		return (SET_ERROR(EREMOTEIO));
 	}
 
+	was_suspended = spa_suspended(spa);
+
 	spa_vdev_state_enter(spa, SCL_NONE);
 
 	if (zc->zc_guid == 0) {
@@ -6194,7 +6211,7 @@ zfs_ioc_clear(zfs_cmd_t *zc)
 
 	vdev_clear(spa, vd);
 
-	(void) spa_vdev_state_exit(spa, spa_suspended(spa) ?
+	(void) spa_vdev_state_exit(spa, was_suspended ?
 	    NULL : spa->spa_root_vdev, 0);
 
 	/*
@@ -6202,6 +6219,27 @@ zfs_ioc_clear(zfs_cmd_t *zc)
 	 */
 	if (zio_resume(spa) != 0)
 		error = SET_ERROR(EIO);
+
+	/*
+	 * If the pool was suspended, automatically start a scrub of
+	 * recent data to verify integrity of blocks written during
+	 * the period of instability.  We do this best-effort and
+	 * don't let a failure here override the clear result.
+	 */
+	if (error == 0 && was_suspended) {
+		uint64_t txg_start = 0;
+		hrtime_t lasttime;
+
+		mutex_enter(&spa->spa_txg_log_time_lock);
+		lasttime = dbrrd_tail_time(&spa->spa_txg_log_time);
+		if (lasttime > zfs_scrub_recent_time) {
+			txg_start = dbrrd_query(&spa->spa_txg_log_time,
+			    lasttime - zfs_scrub_recent_time, DBRRD_FLOOR);
+		}
+		mutex_exit(&spa->spa_txg_log_time_lock);
+
+		(void) spa_scan_range(spa, POOL_SCAN_SCRUB, txg_start, 0);
+	}
 
 	spa_close(spa, FTAG);
 
